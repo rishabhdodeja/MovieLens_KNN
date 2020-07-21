@@ -1,0 +1,251 @@
+---
+title: "MovieLens_Project"
+author: "Rishabh Singh Dodeja"
+date: "June 19, 2020"
+output: pdf_document
+---
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+Note that the `echo = False` parameter can be added to the code chunk to prevent printing of the R code in particular chunk.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Data Ingestion
+
+The chunk below generated Train and Validation Datasets from MovieLens 10M Data
+(source: "Project Overview: MovieLens > Create Train and Validation Sets")
+
+```{r}
+################################
+# Create edx set, validation set
+################################
+
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+
+# MovieLens 10M dataset:
+ # https://grouplens.org/datasets/movielens/10m/
+ # http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+#dl <- tempfile()
+#download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines("F:\\Online Courses\\Data Science Capstone - Harvard\\ml-10M100K\\ratings.dat")),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed((readLines("F:\\Online Courses\\Data Science Capstone - Harvard\\ml-10M100K\\movies.dat")), "\\::", 3)
+ colnames(movies) <- c("movieId", "title", "genres")
+ movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                            title = as.character(title),
+                                            genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding")
+# if using R 3.5 or earlier, use `set.seed(1)` instead
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+ edx <- movielens[-test_index,]
+ temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+      semi_join(edx, by = "movieId") %>%
+      semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+ edx <- rbind(edx, removed)
+
+rm(ratings, movies, test_index, temp, movielens, removed)
+```
+
+```{r}
+
+userRatings <- edx %>% filter(userId %in% unique(userId)) %>% select (userId, movieId, rating) %>% spread(movieId, rating);
+grouped <- edx %>% group_by(movieId) %>% summarize(count=n(),avg_rating=mean(rating));
+```
+
+```{r}
+dropna <- function(x)
+  any(!is.na(x))
+
+```
+
+```{r}
+getGenreArray <- function(movieID)
+{
+  Genre = array(0,19)
+  genreString <- (edx[edx$movieId==movieID,])$genre[1];
+  if(grepl(genreString, "Drama")!= FALSE)
+    Genre[1]=1;
+  if(grepl(genreString, "Comedy")!= FALSE)
+    Genre[2]=1;
+  if(grepl(genreString, "Action")!= FALSE)
+    Genre[3]=1;
+  if(grepl(genreString, "Thriller")!= FALSE)
+    Genre[4]=1;
+  if(grepl(genreString, "Adventure")!= FALSE)
+    Genre[5]=1;
+  if(grepl(genreString, "Romance")!=FALSE)
+    Genre[6]=1;
+  if(grepl(genreString, "Sci-Fi")!=FALSE)
+    Genre[7]=1;
+  if(grepl(genreString, "Crime")!=FALSE)
+    Genre[8]=1;
+  if(grepl(genreString, "Fantasy")!=FALSE)
+    Genre[9]=1;
+  if(grepl(genreString, "Childern")!=FALSE)
+    Genre[10]=1;
+  if(grepl(genreString, "Horror")!=FALSE)
+    Genre[11]=1;
+  if(grepl(genreString, "Mystery")!=FALSE)
+    Genre[12]=1;
+  if(grepl(genreString, "War")!=FALSE)
+    Genre[13]=1;
+  if(grepl(genreString, "Animation")!=FALSE)
+    Genre[14]=1;
+  if(grepl(genreString, "Musical")!=FALSE)
+    Genre[15]=1;
+  if(grepl(genreString, "Western")!=FALSE)
+    Genre[16]=1;
+  if(grepl(genreString, "Film-Noir")!=FALSE)
+    Genre[17]=1;
+  if(grepl(genreString, "Documentary")!=FALSE)
+    Genre[18]=1;
+  if(grepl(genreString, "IMAX")!=FALSE)
+    Genre[19]=1;
+  return(Genre);
+}
+```
+
+#K-Nearest-Neighbours(KNN) Model - to predict rating
+
+```{r}
+myRatings <- data.frame();
+predicted_ratings <-data.frame();
+```
+
+
+```{r}
+ComputeDistance <- function(a,b)
+{
+ print("............in calculation",quote = FALSE);  
+ Title_A = (edx[edx$movieId==a,])$title[1];
+ Genre_A = getGenreArray(a);
+ Year_A = as.numeric(str_sub(Title_A, -5,-2));
+ Pop_A = grouped[grouped$movieId==a,]$count;
+ AvgRating_A = grouped[grouped$movieId==a,]$avg_rating;
+ 
+ Title_B = (edx[edx$movieId==b,])$title[1];
+ Genre_B = getGenreArray(b);
+ Year_B = as.numeric(str_sub(Title_B, -5,-2));
+ Pop_B = grouped[grouped$movieId==b,]$count;
+ AvgRating_B = grouped[grouped$movieId==b,]$avg_rating;
+ 
+ genreDistance = sqrt(sum((Genre_A-Genre_B)^2));
+ decadeDisance = (Year_A-Year_B)/10;
+ popDistance = (Pop_A-Pop_B)/250;
+ ratingDistance = AvgRating_A - AvgRating_B;
+ totalDistance = abs(decadeDisance+popDistance + ratingDistance);
+ return(totalDistance);
+ 
+}
+```
+
+```{r}
+getNeighbours <- function(movieID,K)
+{
+ distances<<- data.frame(movieId=character(),distance=numeric(),Rating=numeric());
+ samples = colnames((myRatings))[-1];  
+ for (movie in samples)
+  {
+    if(movie != movieID)
+       { 
+         print(paste("........calculating distance with movieID",movie),quote=FALSE);
+         movieId = as.numeric(movie);
+         Rating = as.numeric(myRatings[1,..movie]);
+         distance = ComputeDistance(movieID,movie);
+         
+         print(paste("............now assigning"),quote=FALSE);
+         distrow <- data.frame(movieId,distance,Rating);
+         print(paste("............now binding"),quote=FALSE);
+         distances<<- rbind(distances,distrow);
+       }
+  }
+  print(paste("........returning neighbours"),quote=FALSE);
+  neighbours <- (distances[order(distances$distance),])[1:K,];
+  return(neighbours);
+}
+```
+
+```{r}
+PredictRating<- function(movieID)
+{
+  K=5;
+  neighbours <-getNeighbours(movieID,K);
+  PredRating <- mean(neighbours$Rating);
+  print(paste("........predicted rating", PredRating),quote = FALSE)
+  return(PredRating);
+}
+```
+
+```{r}
+Cal_RMSE <- function(val)
+{
+  predicted_ratings <<- val %>% select(movieId,userId,rating) %>% mutate(pred=0);
+  IDs <-unique(val$userId);
+  for( userID in IDs)
+  {
+    print(paste("calculating predictions for userID", userID),quote=FALSE);
+    myRatings <<- (userRatings[userRatings$userId == userID, ]) %>% select_if(dropna);
+    movies <- predicted_ratings[(userId==userID),]$movieId;
+    
+    for(movieID in movies )
+    {
+      print(paste("....calculating predictions for movieID", movieID),quote=FALSE);
+      predicted_ratings[(movieId==movieID & userId==userID),]$pred <<- PredictRating(movieID);
+      #print(predicted_ratings[(movieId==movieID & userId==userID),]);
+    }
+  }
+  rmse = RMSE(predicted_ratings$rating,predicted_ratings$pred);
+  return(rmse);
+}
+```
+
+```{r}
+rmse_val = Cal_RMSE(validation);
+rmse_train =Cal_RMSE(edx)
+```
+
+```{r}
+Title_A = (edx[edx$movieId==5,])$title[1];
+ Genre_A = getGenreArray(5);
+ Year_A = as.numeric(str_sub(Title_A, -5,-2));
+ Pop_A = grouped[grouped$movieId==5,]$count;
+ AvgRating_A = grouped[grouped$movieId==5,]$avg_rating;
+ 
+ Title_B = (edx[edx$movieId==10,])$title[1];
+ Genre_B = getGenreArray(10);
+ Year_B = as.numeric(str_sub(Title_B, -5,-2));
+ Pop_B = grouped[grouped$movieId==10,]$count;
+ AvgRating_B = grouped[grouped$movieId==10,]$avg_rating;
+ 
+ genreDistance = sqrt(sum((Genre_A-Genre_B)^2));
+ decadeDisance = (Year_A-Year_B)/10;
+ popDistance = (Pop_A-Pop_B)/250;
+ ratingDistance = AvgRating_A - AvgRating_B;
+ totalDistance = abs(genreDistance+decadeDisance+popDistance + ratingDistance);
+rm(Title_A,Title_B,Genre_A,Genre_B,Pop_A,Pop_B,AvgRating_A,AvgRating_B,totalDistance,genreDistance,decadeDisance,popDistance,Year_A,Year_B,ratingDistance)
+```
+
